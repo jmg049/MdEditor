@@ -1,0 +1,15 @@
+[package]
+name = "md_edit"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+catppuccin-egui = {path = "../egui"}
+eframe = "0.26.2"
+egui = "0.26.2"
+egui-toast = "0.12.1"
+egui_commonmark = { version = "0.13.0", features = ["better_syntax_highlighting", "svg", "fetch"] }
+egui_file = "0.16.2"
+epaint = "0.26.2"
+shellexpand = "3.1.0"
+thiserror = "1.0.57"
