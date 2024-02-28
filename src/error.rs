@@ -7,4 +7,6 @@ pub(crate) type MdResult<T> = Result<T, MdError>;
 pub(crate) enum MdError {
     #[error("IO error: {0}")]
     Io(#[from] std::io::Error),
+    #[error("Invalid action: {0}")]
+    InvalidAction(String),
 }

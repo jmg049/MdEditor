@@ -1,10 +1,15 @@
 [package]
-name = "md_edit"
+name = "MdEditor"
 version = "0.1.0"
 edition = "2021"
+author = "Jack Geraghty"
+repository = "https://github.com/jmg049/MdEditor"
+license = "MIT"
+readme = "./README.MD"
+
 
 [dependencies]
-catppuccin-egui = {path = "../egui"}
+catppuccin-egui = {path="../egui"}
 eframe = "0.26.2"
 egui = "0.26.2"
 egui-toast = "0.12.1"
@@ -13,3 +18,8 @@ egui_file = "0.16.2"
 epaint = "0.26.2"
 shellexpand = "3.1.0"
 thiserror = "1.0.57"
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1

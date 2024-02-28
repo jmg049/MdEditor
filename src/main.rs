@@ -1,9 +1,12 @@
 #![feature(let_chains)]
 mod command;
 mod error;
+mod hotkeys;
+mod actions;
+mod fonts;
 
 use eframe;
-use egui::{self, FontDefinitions};
+use egui::{self, FontDefinitions, FontId, Response, TextStyle};
 use std::{
     borrow::Cow,
     ffi::OsStr,
@@ -15,7 +18,7 @@ use egui_commonmark::CommonMarkViewer;
 use egui_file::FileDialog;
 use egui_toast::{Toast, ToastKind, ToastOptions, Toasts};
 use error::MdResult;
-
+use crate::fonts::FontConfig;
 use crate::command::Command;
 
 fn main() -> Result<(), eframe::Error> {
@@ -47,6 +50,7 @@ const STATE_ORDERING: [MdEditState; 3] = [
 struct MdEdit {
     current_file: Option<PathBuf>,
     current_dir: Option<PathBuf>,
+    files_cache: Vec<PathBuf>,
     cache: egui_commonmark::CommonMarkCache,
     current_content: String,
     content_changed: bool,
@@ -66,6 +70,7 @@ impl Default for MdEdit {
             file_dialogue: None,
             command_input: String::from(""),
             state: 0,
+            files_cache: vec![],
         }
     }
 }
@@ -129,7 +134,105 @@ impl MdEdit {
         files
     }
 
-    fn toolbar(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) -> MdResult<()> {
+    fn toolbar(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame, toasts: &mut Toasts) -> MdResult<()> {
+        egui::TopBottomPanel::top("Toolbar").show(ctx, |ui| {
+            ui.horizontal(|ui| {
+                let mut do_save = false;
+                if ui.button("Save").clicked() {
+                    match &self.current_file {
+                        Some(_) => {
+                            self.file_dialogue = None;
+                            do_save = true;
+                        }
+                        None => {
+                            let filter = Box::new({
+                                let ext = Some(OsStr::new("md"));
+                                move |p: &Path| p.extension() == ext || p.is_dir()
+                            });
+                            let mut dialog = FileDialog::save_file(self.current_file.clone())
+                                .show_files_filter(filter);
+                            dialog.open();
+                            self.file_dialogue = Some(dialog);
+                            do_save = true;
+                        }
+                    }
+                }
+
+                if ui.button("Save As").clicked() {
+                    let filter = Box::new({
+                        let ext = Some(OsStr::new("md"));
+                        move |p: &Path| p.extension() == ext || p.is_dir()
+                    });
+                    let mut dialog =
+                        FileDialog::save_file(self.current_file.clone()).show_files_filter(filter);
+                    dialog.open();
+                    self.file_dialogue = Some(dialog);
+                    do_save = true;
+                }
+
+                if ui.button("New").clicked() {
+                    // for now save current file if it exists
+                    match &self.current_file {
+                        Some(_) => {
+                            match MdEdit::save_current_file(
+                                &self.current_file.as_ref().unwrap(),
+                                &self.current_content,
+                                toasts,
+                            ) {
+                                Ok(()) => {
+                                    self.content_changed = false;
+                                }
+                                Err(e) => {
+                                    dbg!(e);
+                                }
+                            }
+                        }
+                        None => (),
+                    }
+
+                    self.current_file = None;
+                    self.current_content = String::from("");
+                }
+
+                // If we didn't open the dialogue, we must already have a file name, so just save it
+                if let Some(dialog) = &mut self.file_dialogue {
+                    if dialog.show(ctx).selected() {
+                        if let Some(file) = dialog.path() {
+                            match MdEdit::save_current_file(
+                                file,
+                                &self.current_content,
+                                toasts,
+                            ) {
+                                Ok(()) => {
+                                    self.content_changed = false;
+                                }
+                                Err(e) => {
+                                    dbg!(e);
+                                }
+                            }
+                        }
+                    }
+                } else if do_save {
+                    match &self.current_file {
+                        Some(file) => {
+                            match MdEdit::save_current_file(
+                                file,
+                                &self.current_content,
+                                toasts,
+                            ) {
+                                Ok(()) => {
+                                    self.content_changed = false;
+                                }
+                                Err(e) => {
+                                    dbg!(e);
+                                }
+                            }
+                        }
+                        None => (),
+                    }
+                }
+            });
+        });
         Ok(())
     }
 
@@ -229,12 +332,47 @@ impl MdEdit {
             .response)
     }
 
-    fn editor(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) -> MdResult<()> {
-        Ok(())
+    fn editor(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) -> MdResult<Response> {
+        Ok(egui::CentralPanel::default()
+            .show(ctx, |ui| {
+                egui::ScrollArea::vertical().show(ui, |ui| {
+                    let response = ui.add_sized(
+                        ui.available_size(),
+                        egui::TextEdit::multiline(&mut self.current_content).lock_focus(true)
+                    );
+
+                    if response.changed() && !self.current_content.is_empty() {
+                        dbg!("Content changed");
+                        self.content_changed = true;
+                    }
+
+                    let tab_pressed = ctx.input(|i| i.key_pressed(egui::Key::Tab));
+                    let ctrl_modifier = ctx.input(|i| i.modifiers.command_only());
+                    if tab_pressed && ctrl_modifier {
+                        dbg!("Ctrl + Tab");
+                        response.surrender_focus();
+                    }
+
+                });
+            })
+            .response)
     }
 
-    fn preview(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) -> MdResult<()> {
-        Ok(())
+    fn preview(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame, panel_width: f32) -> MdResult<Response> {
+        let side_panel = egui::SidePanel::right("Preview")
+            .resizable(false)
+            .exact_width(panel_width)
+            .show(ctx, |ui| {
+                egui::ScrollArea::vertical().show(ui, |ui| {
+                    CommonMarkViewer::new("Preview").show(
+                        ui,
+                        &mut self.cache,
+                        &self.current_content,
+                    );
+                });
+            })
+            .response;
+        Ok(side_panel)
     }
 }
 
@@ -272,6 +410,14 @@ impl eframe::App for MdEdit {
             .anchor(egui::Align2::RIGHT_BOTTOM, (-10.0, -10.0)) // 10 units from the bottom right corner
             .direction(egui::Direction::BottomUp);
 
+        let mut style = (*ctx.style()).clone();
+        let font_config: FontConfig = FontConfig::default();
+        Into::<Vec<(TextStyle, FontId)>>::into(font_config).iter().for_each(|(s, font_id)| {
+            style.text_styles.insert(s.clone(), font_id.clone());
+        });
+        ctx.set_style(style);
+
+
         let command_response = match self.command_panel(ctx, _frame) {
             Ok(res) => res,
             Err(e) => {
@@ -282,106 +428,14 @@ impl eframe::App for MdEdit {
             }
         };
 
-        let toolbar_response = egui::TopBottomPanel::top("Toolbar").show(ctx, |ui| {
-            ui.horizontal(|ui| {
-                let mut do_save = false;
-                if ui.button("Save").clicked() {
-                    match &self.current_file {
-                        Some(_) => {
-                            self.file_dialogue = None;
-                            do_save = true;
-                        }
-                        None => {
-                            let filter = Box::new({
-                                let ext = Some(OsStr::new("md"));
-                                move |p: &Path| p.extension() == ext || p.is_dir()
-                            });
-                            let mut dialog = FileDialog::save_file(self.current_file.clone())
-                                .show_files_filter(filter);
-                            dialog.open();
-                            self.file_dialogue = Some(dialog);
-                            do_save = true;
-                        }
-                    }
-                }
+        let toolbar_response = match self.toolbar(ctx, _frame, &mut toasts) {
+            Ok(res) => res,
+            Err(e) => {
+                panic!("Error encountered while creating the toolbar: {:?}", e);
+            }
+        };
 
-                if ui.button("Save As").clicked() {
-                    let filter = Box::new({
-                        let ext = Some(OsStr::new("md"));
-                        move |p: &Path| p.extension() == ext || p.is_dir()
-                    });
-                    let mut dialog =
-                        FileDialog::save_file(self.current_file.clone()).show_files_filter(filter);
-                    dialog.open();
-                    self.file_dialogue = Some(dialog);
-                    do_save = true;
-                }
-
-                if ui.button("New").clicked() {
-                    // for now save current file if it exists
-                    match &self.current_file {
-                        Some(_) => {
-                            match MdEdit::save_current_file(
-                                &self.current_file.as_ref().unwrap(),
-                                &self.current_content,
-                                &mut toasts,
-                            ) {
-                                Ok(()) => {
-                                    self.content_changed = false;
-                                }
-                                Err(e) => {
-                                    dbg!(e);
-                                }
-                            }
-                        }
-                        None => (),
-                    }
-
-                    self.current_file = None;
-                    self.current_content = String::from("");
-                }
-
-                // If we didn't open the dialogue, we must already have a file name, so just save it
-                if let Some(dialog) = &mut self.file_dialogue {
-                    if dialog.show(ctx).selected() {
-                        if let Some(file) = dialog.path() {
-                            match MdEdit::save_current_file(
-                                file,
-                                &self.current_content,
-                                &mut toasts,
-                            ) {
-                                Ok(()) => {
-                                    self.content_changed = false;
-                                }
-                                Err(e) => {
-                                    dbg!(e);
-                                }
-                            }
-                        }
-                    }
-                } else if do_save {
-                    match &self.current_file {
-                        Some(file) => {
-                            match MdEdit::save_current_file(
-                                file,
-                                &self.current_content,
-                                &mut toasts,
-                            ) {
-                                Ok(()) => {
-                                    self.content_changed = false;
-                                }
-                                Err(e) => {
-                                    dbg!(e);
-                                }
-                            }
-                        }
-                        None => (),
-                    }
-                }
-            });
-        });
-
-        let files_resposne = match self.file_explorer(ctx, _frame, left_panel_width, &mut toasts) {
+        let files_response = match self.file_explorer(ctx, _frame, left_panel_width, &mut toasts) {
             Ok(res) => res,
             Err(e) => {
                 panic!(
@@ -391,35 +445,21 @@ impl eframe::App for MdEdit {
             }
         };
 
-        let preview_response = egui::SidePanel::right("Preview")
-            .resizable(true)
-            .exact_width(right_panel_width)
-            .show(ctx, |ui| {
-                egui::ScrollArea::vertical().show(ui, |ui| {
-                    CommonMarkViewer::new("Preview").show(
-                        ui,
-                        &mut self.cache,
-                        &self.current_content,
-                    );
-                });
-            })
-            .response;
+        let preview_response = match self.preview(ctx, _frame, right_panel_width) {
+            Ok(res) => res,
+            Err(e) => {
+                panic!("Error encountered while creating the preview panel: {:?}", e);
+            }
+        };
 
-        let editor_response = egui::CentralPanel::default()
-            .show(ctx, |ui| {
-                egui::ScrollArea::vertical().show(ui, |ui| {
-                    let response = ui.add_sized(
-                        ui.available_size(),
-                        egui::TextEdit::multiline(&mut self.current_content),
-                    );
 
-                    if response.changed() {
-                        dbg!("Content changed");
-                        self.content_changed = true;
-                    }
-                });
-            })
-            .response;
+
+        let editor_response = match self.editor(ctx, _frame) {
+            Ok(res) => res,
+            Err(e) => {
+                panic!("Error encountered while creating the editor panel: {:?}", e);
+            }
+        };
 
         toasts.show(ctx);
     }
