@@ -1,39 +1,35 @@
 use std::collections::HashMap;
 
-use egui::{Modifiers, Key};
+use egui::{Key, Modifiers};
 
-use crate::error::MdResult;
 use crate::actions::Action;
-
-
+use crate::error::MdResult;
 
 #[derive(Hash, Eq, PartialEq, Clone, Debug)]
 pub(crate) struct HotKey {
     key: Key,
-    modifiers: Modifiers
+    modifiers: Modifiers,
 }
 
-
-
-pub(crate) struct HotKeyManager<'a> {
-    hotkeys: HashMap<HotKey, Action<'a> >
+pub(crate) struct KeyManager<'a> {
+    hotkeys: HashMap<HotKey, Action<'a>>,
 }
 
-impl<'a>  Default for HotKeyManager<'a> {
+impl<'a> Default for KeyManager<'a> {
     fn default() -> Self {
         Self {
-            hotkeys: HashMap::new()
+            hotkeys: HashMap::new(),
         }
     }
-
 }
 
-impl<'a> HotKeyManager<'a> {
+impl<'a> KeyManager<'a> {
+    pub fn handle(&self, ctx: &egui::Context) {
+        todo!("Handle hotkeys")
+    }
+
     pub fn register_hotkey(&mut self, key: Key, modifiers: Modifiers, action: Action<'a>) {
-        let hotkey = HotKey {
-            key,
-            modifiers
-        };
+        let hotkey = HotKey { key, modifiers };
         self.hotkeys.insert(hotkey, action);
     }
 
@@ -47,7 +43,7 @@ impl<'a> HotKeyManager<'a> {
 
     pub fn from_config(config: HashMap<String, String>) -> MdResult<Self> {
         // config map will contain (key combination -> action name), the keys will be separated by '+'
-        let mut hotkey_manager = HotKeyManager::default();
+        let mut hotkey_manager = KeyManager::default();
 
         // for (key_combination, action_name) in config {
         //     let key_combination: Vec<&str> = key_combination.split('+').collect();

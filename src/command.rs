@@ -1,4 +1,33 @@
-use crate::MdEdit;
+use crate::{
+    core::MdEditor,
+    editor::{self, Editor},
+    files::FilesManager,
+    MdEdit,
+};
+
+pub(crate) struct CommandManager {
+    history: Vec<Command>,
+}
+
+impl CommandManager {
+    pub(crate) fn update(
+        &mut self,
+        ctx: &egui::Context,
+        frame: &mut eframe::Frame,
+        editor: &mut Editor,
+        file_manager: &mut FilesManager,
+    ) {
+        todo!()
+    }
+}
+
+impl Default for CommandManager {
+    fn default() -> Self {
+        Self {
+            history: Vec::new(),
+        }
+    }
+}
 
 pub enum Command {
     Save(String),

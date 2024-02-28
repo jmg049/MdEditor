@@ -1,9 +1,13 @@
 #![feature(let_chains)]
-mod command;
-mod error;
-mod hotkeys;
 mod actions;
+mod command;
+mod core;
+mod dialog;
+mod editor;
+mod error;
+mod files;
 mod fonts;
+mod hotkeys;
 
 use eframe;
 use egui::{self, FontDefinitions, FontId, Response, TextStyle};
@@ -14,12 +18,12 @@ use std::{
     path::{Path, PathBuf},
 };
 
+use crate::command::Command;
+use crate::fonts::FontConfig;
 use egui_commonmark::CommonMarkViewer;
 use egui_file::FileDialog;
 use egui_toast::{Toast, ToastKind, ToastOptions, Toasts};
 use error::MdResult;
-use crate::fonts::FontConfig;
-use crate::command::Command;
 
 fn main() -> Result<(), eframe::Error> {
     let options = eframe::NativeOptions {
@@ -47,12 +51,12 @@ const STATE_ORDERING: [MdEditState; 3] = [
     MdEditState::Files,
 ];
 
-struct MdEdit {
+pub struct MdEdit {
     current_file: Option<PathBuf>,
     current_dir: Option<PathBuf>,
     files_cache: Vec<PathBuf>,
     cache: egui_commonmark::CommonMarkCache,
-    current_content: String,
+    pub(crate) current_content: String,
     content_changed: bool,
     file_dialogue: Option<FileDialog>,
     command_input: String,
@@ -134,7 +138,12 @@ impl MdEdit {
         files
     }
 
-    fn toolbar(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame, toasts: &mut Toasts) -> MdResult<()> {
+    fn toolbar(
+        &mut self,
+        ctx: &egui::Context,
+        _frame: &mut eframe::Frame,
+        toasts: &mut Toasts,
+    ) -> MdResult<()> {
         egui::TopBottomPanel::top("Toolbar").show(ctx, |ui| {
             ui.horizontal(|ui| {
                 let mut do_save = false;
@@ -198,11 +207,7 @@ impl MdEdit {
                 if let Some(dialog) = &mut self.file_dialogue {
                     if dialog.show(ctx).selected() {
                         if let Some(file) = dialog.path() {
-                            match MdEdit::save_current_file(
-                                file,
-                                &self.current_content,
-                                toasts,
-                            ) {
+                            match MdEdit::save_current_file(file, &self.current_content, toasts) {
                                 Ok(()) => {
                                     self.content_changed = false;
                                 }
@@ -215,11 +220,7 @@ impl MdEdit {
                 } else if do_save {
                     match &self.current_file {
                         Some(file) => {
-                            match MdEdit::save_current_file(
-                                file,
-                                &self.current_content,
-                                toasts,
-                            ) {
+                            match MdEdit::save_current_file(file, &self.current_content, toasts) {
                                 Ok(()) => {
                                     self.content_changed = false;
                                 }
@@ -338,7 +339,7 @@ impl MdEdit {
                 egui::ScrollArea::vertical().show(ui, |ui| {
                     let response = ui.add_sized(
                         ui.available_size(),
-                        egui::TextEdit::multiline(&mut self.current_content).lock_focus(true)
+                        egui::TextEdit::multiline(&mut self.current_content).lock_focus(true),
                     );
 
                     if response.changed() && !self.current_content.is_empty() {
@@ -352,13 +353,17 @@ impl MdEdit {
                         dbg!("Ctrl + Tab");
                         response.surrender_focus();
                     }
-
                 });
             })
             .response)
     }
 
-    fn preview(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame, panel_width: f32) -> MdResult<Response> {
+    fn preview(
+        &mut self,
+        ctx: &egui::Context,
+        _frame: &mut eframe::Frame,
+        panel_width: f32,
+    ) -> MdResult<Response> {
         let side_panel = egui::SidePanel::right("Preview")
             .resizable(false)
             .exact_width(panel_width)
@@ -412,11 +417,12 @@ impl eframe::App for MdEdit {
 
         let mut style = (*ctx.style()).clone();
         let font_config: FontConfig = FontConfig::default();
-        Into::<Vec<(TextStyle, FontId)>>::into(font_config).iter().for_each(|(s, font_id)| {
-            style.text_styles.insert(s.clone(), font_id.clone());
-        });
+        Into::<Vec<(TextStyle, FontId)>>::into(font_config)
+            .iter()
+            .for_each(|(s, font_id)| {
+                style.text_styles.insert(s.clone(), font_id.clone());
+            });
         ctx.set_style(style);
-
 
         let command_response = match self.command_panel(ctx, _frame) {
             Ok(res) => res,
@@ -448,11 +454,12 @@ impl eframe::App for MdEdit {
         let preview_response = match self.preview(ctx, _frame, right_panel_width) {
             Ok(res) => res,
             Err(e) => {
-                panic!("Error encountered while creating the preview panel: {:?}", e);
+                panic!(
+                    "Error encountered while creating the preview panel: {:?}",
+                    e
+                );
             }
         };
-
-
 
         let editor_response = match self.editor(ctx, _frame) {
             Ok(res) => res,
